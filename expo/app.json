@@ -1,0 +1,63 @@
+{
+  "expo": {
+    "name": "Island Chat",
+    "slug": "3usu8o6ti2hora1bifwvn",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "rork-app",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "app.rork.3usu8o6ti2hora1bifwvn",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Allow Island Chat to access your photos so you can send pictures in chats.",
+        "NSPhotoLibraryAddUsageDescription": "Allow Island Chat to save photos you share in chats.",
+        "NSCameraUsageDescription": "Allow Island Chat to use the camera so you can take and send photos in chats.",
+        "NSMicrophoneUsageDescription": "Allow Island Chat to access the microphone so you can record and send voice notes."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "app.rork.3usu8o6ti2hora1bifwvn"
+    },
+    "web": {
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-router",
+        {
+          "origin": "https://rork.com/"
+        }
+      ],
+      "expo-font",
+      "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Island Chat to access your photos so you can send pictures in chats.",
+          "cameraPermission": "Allow Island Chat to use the camera so you can take and send photos in chats."
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Allow Island Chat to access the microphone so you can record and send voice notes."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
