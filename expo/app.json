@@ -28,7 +28,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "app.rork.3usu8o6ti2hora1bifwvn"
+      "package": "com.busbystudios.globalislandchat"
     },
     "web": {
       "favicon": "./assets/images/favicon.png"
