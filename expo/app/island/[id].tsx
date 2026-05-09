@@ -4,11 +4,13 @@ import { router, useLocalSearchParams, Stack } from 'expo-router';
 import { Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { ChevronLeft, Shield, Users, X, Info, AlertTriangle } from 'lucide-react-native';
+import { Alert } from 'react-native';
+import { ChevronLeft, Shield, Users, X, Info, AlertTriangle, Bell, BellOff } from 'lucide-react-native';
 import { getIsland } from '@/constants/islands';
 import ChatRoom from '@/components/ChatRoom';
 import Colors from '@/constants/colors';
 import { useChat } from '@/contexts/ChatContext';
+import { useUser } from '@/contexts/UserContext';
 import FlagBadge from '@/components/FlagBadge';
 
 export default function IslandChatScreen() {
@@ -16,7 +18,9 @@ export default function IslandChatScreen() {
   const insets = useSafeAreaInsets();
   const island = getIsland(id ?? '');
   const { membersByRoom, countByRoom } = useChat();
+  const { islandSubscriptions, setIslandSubscribed, registerForPush } = useUser();
   const [infoOpen, setInfoOpen] = useState<boolean>(false);
+  const subscribed = !!island && islandSubscriptions.includes(island.id);
 
   if (!island) {
     return (
@@ -60,6 +64,28 @@ export default function IslandChatScreen() {
           </TouchableOpacity>
 
           <View style={styles.headerActions}>
+            <TouchableOpacity
+              style={styles.actionBtn}
+              hitSlop={8}
+              testID="island-notify-toggle"
+              onPress={() => {
+                void (async () => {
+                  const next = !subscribed;
+                  if (next) {
+                    const res = await registerForPush();
+                    if (!res.ok && Platform.OS !== 'web') {
+                      Alert.alert('Notifications off', res.error ?? 'Enable notifications in your phone settings.');
+                      return;
+                    }
+                  }
+                  await setIslandSubscribed(island.id, next);
+                })();
+              }}
+            >
+              {subscribed
+                ? <Bell size={20} color={Colors.accentLight} />
+                : <BellOff size={20} color={Colors.textTertiary} />}
+            </TouchableOpacity>
             <TouchableOpacity style={styles.actionBtn} hitSlop={8} onPress={() => setInfoOpen(true)}>
               <Shield size={20} color={Colors.accentLight} />
             </TouchableOpacity>

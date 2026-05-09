@@ -5,6 +5,7 @@ export interface UserProfile {
   islandId?: string;
   createdAt: string;
   hasRecovery?: boolean;
+  dmPushEnabled?: boolean;
 }
 
 export type MessageKind = 'text' | 'image' | 'voice';

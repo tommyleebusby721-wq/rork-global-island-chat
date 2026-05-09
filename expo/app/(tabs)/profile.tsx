@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import ScreenLayout, { LAYOUT } from '@/components/ScreenLayout';
-import { LogOut, ChevronRight, Languages, Check, ShieldCheck, UserX, Clock, Pencil, X, Globe2, MapPin, Search, Heart, Sparkles, Flame, TrendingUp, KeyRound, AlertTriangle, Lock, LifeBuoy, Trash2, FileText } from 'lucide-react-native';
+import { LogOut, ChevronRight, Languages, Check, ShieldCheck, UserX, Clock, Pencil, X, Globe2, MapPin, Search, Heart, Sparkles, Flame, TrendingUp, KeyRound, AlertTriangle, Lock, LifeBuoy, Trash2, FileText, Bell, BellOff } from 'lucide-react-native';
 import { Linking } from 'react-native';
 import { TERMS_URL, PRIVACY_URL } from '@/constants/moderation';
 import { useUser, SUPPORTED_LANGUAGES } from '@/contexts/UserContext';
@@ -23,12 +23,15 @@ export default function ProfileScreen() {
     preferredLanguage, autoTranslate, updatePreferredLanguage, updateAutoTranslate,
     allowDmFromEveryone, updateAllowDmFromEveryone,
     blocked, unblockUser, allUsers,
+    islandSubscriptions, setIslandSubscribed, setDmPushEnabled, registerForPush,
   } = useUser();
   const [deletingAccount, setDeletingAccount] = useState<boolean>(false);
   const [editOpen, setEditOpen] = useState<boolean>(false);
   const [blockedOpen, setBlockedOpen] = useState<boolean>(false);
   const [langOpen, setLangOpen] = useState<boolean>(false);
   const [islandOpen, setIslandOpen] = useState<boolean>(false);
+  const [islandNotifOpen, setIslandNotifOpen] = useState<boolean>(false);
+  const [islandNotifQuery, setIslandNotifQuery] = useState<string>('');
   const [islandQuery, setIslandQuery] = useState<string>('');
   const [selected, setSelected] = useState<string>(profile?.avatarEmoji ?? AVATAR_EMOJIS[0]);
 
@@ -322,6 +325,60 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+        <Text style={styles.sectionLabel}>Notifications</Text>
+        <View style={styles.card}>
+          <View style={styles.row}>
+            <View style={styles.rowLeft}>
+              <View style={styles.iconBubble}><Bell size={16} color={Colors.accentLight} /></View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowLabel}>Direct messages</Text>
+                <Text style={styles.rowHint}>Get notified when someone DMs you</Text>
+              </View>
+            </View>
+            <Switch
+              value={profile?.dmPushEnabled ?? true}
+              onValueChange={(v) => {
+                void (async () => {
+                  if (v) {
+                    const res = await registerForPush();
+                    if (!res.ok && Platform.OS !== 'web') {
+                      Alert.alert('Notifications off', res.error ?? 'Enable notifications in your phone settings.');
+                      return;
+                    }
+                  }
+                  await setDmPushEnabled(v);
+                })();
+              }}
+              trackColor={{ false: Colors.bgCard, true: '#22C55E' }}
+              thumbColor={Colors.white}
+              testID="dm-push-switch"
+            />
+          </View>
+          <View style={styles.rowDivider} />
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => setIslandNotifOpen(true)}
+            testID="island-notif-row"
+          >
+            <View style={styles.rowLeft}>
+              <View style={styles.iconBubble}>
+                {islandSubscriptions.length > 0
+                  ? <Bell size={16} color={Colors.accentLight} />
+                  : <BellOff size={16} color={Colors.textTertiary} />}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowLabel}>Island chats</Text>
+                <Text style={styles.rowHint}>
+                  {islandSubscriptions.length === 0
+                    ? 'No island chats subscribed'
+                    : `${islandSubscriptions.length} island${islandSubscriptions.length === 1 ? '' : 's'} subscribed`}
+                </Text>
+              </View>
+            </View>
+            <ChevronRight size={16} color={Colors.textTertiary} />
+          </TouchableOpacity>
+        </View>
+
         <Text style={styles.sectionLabel}>Privacy Settings</Text>
         <View style={styles.card}>
           <View style={styles.row}>
@@ -601,6 +658,79 @@ export default function ProfileScreen() {
                   </View>
                   {active && <Check size={18} color={Colors.accentLight} />}
                 </TouchableOpacity>
+              );
+            }}
+          />
+        </View>
+      </Modal>
+
+      <Modal visible={islandNotifOpen} transparent animationType="slide" onRequestClose={() => setIslandNotifOpen(false)}>
+        <Pressable style={styles.backdrop} onPress={() => setIslandNotifOpen(false)} />
+        <View style={[styles.sheet, { paddingBottom: insets.bottom + 12, maxHeight: '85%' }]}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.sheetHead}>
+            <Text style={styles.sheetTitle}>Island notifications</Text>
+            <TouchableOpacity onPress={() => setIslandNotifOpen(false)} style={styles.closeBtn}>
+              <X size={16} color={Colors.text} />
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.sheetSub}>Get a push for every new message in islands you turn on.</Text>
+          <View style={styles.searchBar}>
+            <Search size={16} color={Colors.textSecondary} />
+            <TextInput
+              value={islandNotifQuery}
+              onChangeText={setIslandNotifQuery}
+              placeholder="Search islands…"
+              placeholderTextColor={Colors.textTertiary}
+              style={styles.searchInput}
+              autoCorrect={false}
+              autoCapitalize="none"
+            />
+            {islandNotifQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setIslandNotifQuery('')}>
+                <X size={16} color={Colors.textSecondary} />
+              </TouchableOpacity>
+            )}
+          </View>
+          <FlatList
+            data={ISLANDS.filter(i => {
+              const q = islandNotifQuery.trim().toLowerCase();
+              if (!q) return true;
+              return `${i.name} ${i.subtitle ?? ''} ${i.region}`.toLowerCase().includes(q);
+            })}
+            keyExtractor={(i) => i.id}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            style={{ maxHeight: 460 }}
+            renderItem={({ item }) => {
+              const subscribed = islandSubscriptions.includes(item.id);
+              return (
+                <View style={styles.langRow}>
+                  <FlagBadge code={item.flagCode} fallback={item.flag} size={26} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.rowLabel}>{item.name}</Text>
+                    <Text style={{ color: Colors.textTertiary, fontSize: 12, marginTop: 2 }}>{item.region}</Text>
+                  </View>
+                  <Switch
+                    value={subscribed}
+                    onValueChange={(v) => {
+                      void (async () => {
+                        if (v) {
+                          const res = await registerForPush();
+                          if (!res.ok && Platform.OS !== 'web') {
+                            Alert.alert('Notifications off', res.error ?? 'Enable notifications in your phone settings.');
+                            return;
+                          }
+                        }
+                        await setIslandSubscribed(item.id, v);
+                        if (Platform.OS !== 'web') void Haptics.selectionAsync();
+                      })();
+                    }}
+                    trackColor={{ false: Colors.bgCard, true: '#22C55E' }}
+                    thumbColor={Colors.white}
+                    testID={`island-notif-${item.id}`}
+                  />
+                </View>
               );
             }}
           />

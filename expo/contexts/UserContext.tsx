@@ -1,6 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import createContextHook from '@nkzw/create-context-hook';
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
+import Constants from 'expo-constants';
 import { UserProfile } from '@/types';
 import { supabase } from '@/lib/supabase';
 import { TERMS_VERSION } from '@/constants/moderation';
@@ -36,6 +40,7 @@ interface DbProfile {
   device_id: string | null;
   created_at: string;
   security_question?: string | null;
+  dm_push_enabled?: boolean | null;
 }
 
 export const SECURITY_QUESTIONS: string[] = [
@@ -118,6 +123,7 @@ export const [UserProvider, useUser] = createContextHook(() => {
       islandId: p.island_id ?? undefined,
       createdAt: p.created_at,
       hasRecovery: !!p.security_question,
+      dmPushEnabled: p.dm_push_enabled ?? true,
     };
     return mapped;
   }, []);
@@ -613,6 +619,131 @@ export const [UserProvider, useUser] = createContextHook(() => {
     [allUsers],
   );
 
+  const [islandSubscriptions, setIslandSubscriptions] = useState<string[]>([]);
+
+  const refreshIslandSubscriptions = useCallback(async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('island_subscriptions')
+        .select('island_id')
+        .eq('user_id', userId);
+      if (error) throw error;
+      setIslandSubscriptions((data ?? []).map(r => r.island_id as string));
+    } catch (e) {
+      console.log('[island_subs] fetch error', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    void refreshIslandSubscriptions(profile.id);
+  }, [profile?.id, refreshIslandSubscriptions]);
+
+  const setIslandSubscribed = useCallback(
+    async (islandId: string, subscribed: boolean): Promise<{ ok: boolean; error?: string }> => {
+      if (!profile) return { ok: false, error: 'Not signed in' };
+      setIslandSubscriptions(prev => {
+        if (subscribed) return prev.includes(islandId) ? prev : [...prev, islandId];
+        return prev.filter(id => id !== islandId);
+      });
+      try {
+        const { error } = await supabase.rpc('set_island_subscription', {
+          p_island_id: islandId,
+          p_subscribed: subscribed,
+        });
+        if (error) {
+          console.log('[setIslandSubscribed] error', error);
+          return { ok: false, error: error.message };
+        }
+        return { ok: true };
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : 'Network error';
+        return { ok: false, error: msg };
+      }
+    },
+    [profile],
+  );
+
+  const setDmPushEnabled = useCallback(async (enabled: boolean) => {
+    if (!profile) return;
+    setProfile(prev => (prev ? { ...prev, dmPushEnabled: enabled } : prev));
+    try {
+      const { error } = await supabase.rpc('set_dm_push_enabled', { p_enabled: enabled });
+      if (error) console.log('[setDmPushEnabled] error', error);
+    } catch (e) {
+      console.log('[setDmPushEnabled] exception', e);
+    }
+  }, [profile]);
+
+  const registerForPush = useCallback(async (): Promise<{ ok: boolean; error?: string; token?: string }> => {
+    if (Platform.OS === 'web') return { ok: false, error: 'Not supported on web' };
+    if (!Device.isDevice) return { ok: false, error: 'Push requires a real device' };
+    try {
+      const { status: existing } = await Notifications.getPermissionsAsync();
+      let status = existing;
+      if (status !== 'granted') {
+        const req = await Notifications.requestPermissionsAsync();
+        status = req.status;
+      }
+      if (status !== 'granted') return { ok: false, error: 'Notifications permission denied' };
+
+      if (Platform.OS === 'android') {
+        try {
+          await Notifications.setNotificationChannelAsync('default', {
+            name: 'Default',
+            importance: Notifications.AndroidImportance.HIGH,
+            sound: 'default',
+            vibrationPattern: [0, 250, 250, 250],
+            lightColor: '#3B82F6',
+          });
+        } catch (e) { console.log('[push] channel error', e); }
+      }
+
+      const projectId =
+        (Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined)?.eas?.projectId ??
+        (Constants as unknown as { easConfig?: { projectId?: string } }).easConfig?.projectId ??
+        process.env.EXPO_PUBLIC_PROJECT_ID;
+
+      const tokenRes = await Notifications.getExpoPushTokenAsync(
+        projectId ? { projectId } : undefined,
+      );
+      const token = tokenRes.data;
+      if (!token) return { ok: false, error: 'Could not get push token' };
+
+      const { error } = await supabase.rpc('upsert_push_token', {
+        p_token: token,
+        p_platform: Platform.OS,
+        p_device_id: deviceId || null,
+      });
+      if (error) {
+        console.log('[registerForPush] save error', error);
+        return { ok: false, error: error.message };
+      }
+      return { ok: true, token };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Push registration failed';
+      console.log('[registerForPush] exception', e);
+      return { ok: false, error: msg };
+    }
+  }, [deviceId]);
+
+  // Auto-register push token whenever a profile signs in (best-effort, silent).
+  useEffect(() => {
+    if (!profile?.id) return;
+    if (Platform.OS === 'web') return;
+    if (!Device.isDevice) return;
+    void (async () => {
+      try {
+        const { status } = await Notifications.getPermissionsAsync();
+        if (status === 'granted') {
+          await registerForPush();
+        }
+      } catch (e) {
+        console.log('[auto push register] error', e);
+      }
+    })();
+  }, [profile?.id, registerForPush]);
+
   const updatePreferredLanguage = useCallback(async (lang: string) => {
     setPreferredLanguage(lang);
     await AsyncStorage.setItem(LANG_KEY, lang);
@@ -637,7 +768,8 @@ export const [UserProvider, useUser] = createContextHook(() => {
       updatePreferredLanguage, updateAutoTranslate, updateAllowDmFromEveryone,
       setSecurityAnswer, lookupRecoveryQuestion, resetPasswordWithRecovery,
       acceptTerms, submitReport, deleteAccount,
+      islandSubscriptions, setIslandSubscribed, setDmPushEnabled, registerForPush,
     }),
-    [profile, allUsers, isLoading, deviceId, blocked, preferredLanguage, autoTranslate, allowDmFromEveryone, signUp, signIn, signOut, updateAvatar, updateIsland, isUsernameAvailable, blockUser, unblockUser, getUserById, updatePreferredLanguage, updateAutoTranslate, updateAllowDmFromEveryone, setSecurityAnswer, lookupRecoveryQuestion, resetPasswordWithRecovery, acceptTerms, submitReport, deleteAccount],
+    [profile, allUsers, isLoading, deviceId, blocked, preferredLanguage, autoTranslate, allowDmFromEveryone, signUp, signIn, signOut, updateAvatar, updateIsland, isUsernameAvailable, blockUser, unblockUser, getUserById, updatePreferredLanguage, updateAutoTranslate, updateAllowDmFromEveryone, setSecurityAnswer, lookupRecoveryQuestion, resetPasswordWithRecovery, acceptTerms, submitReport, deleteAccount, islandSubscriptions, setIslandSubscribed, setDmPushEnabled, registerForPush],
   );
 });
