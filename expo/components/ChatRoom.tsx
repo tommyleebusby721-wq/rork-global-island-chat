@@ -19,11 +19,11 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
-import { Audio } from 'expo-av';
+import { Audio, Video, ResizeMode } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import {
-  Send, Plus, Image as ImageIcon, Mic, X, Play, Pause, Flag, UserX, Smile, Languages, Loader2, Trash2, Reply, CornerDownRight,
+  Send, Plus, Image as ImageIcon, Video as VideoIcon, Mic, X, Play, Pause, Flag, UserX, Smile, Languages, Loader2, Trash2, Reply, CornerDownRight,
 } from 'lucide-react-native';
 import { router } from 'expo-router';
 import { USE_NATIVE_DRIVER } from '@/constants/animation';
@@ -36,7 +36,8 @@ import { formatTime } from '@/utils/time';
 import { EMOJI_FONT_FAMILY } from '@/constants/avatars';
 import MessageText from '@/components/MessageText';
 import { translateText } from '@/utils/translate';
-import { uploadImageForUser, uploadVoiceForUser, getSignedMediaUrl, invalidateSignedMediaUrl } from '@/lib/mediaStorage';
+import { uploadImageForUser, uploadVoiceForUser, uploadVideoForUser, getSignedMediaUrl, invalidateSignedMediaUrl } from '@/lib/mediaStorage';
+import MediaViewer, { MediaViewerItem } from '@/components/MediaViewer';
 import { moderateText } from '@/constants/moderation';
 
 const REACTIONS: string[] = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
@@ -74,8 +75,16 @@ function extractMentions(text: string): string[] {
 
 function previewOf(m: Message): string {
   if (m.kind === 'image') return '📷 Photo';
+  if (m.kind === 'video') return '🎬 Video';
   if (m.kind === 'voice') return '🎤 Voice note';
   return parseReply(m.text).body;
+}
+
+function formatDuration(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
 function SignedImage({ path, style }: { path: string; style: any }) {
@@ -114,6 +123,48 @@ function SignedImage({ path, style }: { path: string; style: any }) {
         setFailed(true);
       }}
     />
+  );
+}
+
+function VideoBubble({ path, duration, onPress }: { path: string; duration?: number; onPress: () => void }) {
+  const [uri, setUri] = useState<string | null>(null);
+  const [failed, setFailed] = useState<boolean>(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setFailed(false);
+    setUri(null);
+    getSignedMediaUrl(path)
+      .then(u => { if (!cancelled) setUri(u); })
+      .catch(() => { if (!cancelled) setFailed(true); });
+    return () => { cancelled = true; };
+  }, [path]);
+
+  return (
+    <TouchableOpacity activeOpacity={0.85} onPress={onPress} style={styles.bubbleImage}>
+      <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#000', borderRadius: 16, overflow: 'hidden' }]}>
+        {uri && !failed ? (
+          <Video
+            source={{ uri }}
+            style={StyleSheet.absoluteFillObject}
+            resizeMode={ResizeMode.COVER}
+            shouldPlay={false}
+            isMuted
+            useNativeControls={false}
+          />
+        ) : null}
+      </View>
+      <View style={styles.videoOverlay}>
+        <View style={styles.videoPlayCircle}>
+          <Play size={22} color={Colors.white} fill={Colors.white} />
+        </View>
+      </View>
+      {typeof duration === 'number' && duration > 0 ? (
+        <View style={styles.videoDurationBadge}>
+          <Text style={styles.videoDurationText}>{formatDuration(duration)}</Text>
+        </View>
+      ) : null}
+    </TouchableOpacity>
   );
 }
 
@@ -214,6 +265,7 @@ function BubbleContent({
   onTranslate,
   onToggleShowOriginal,
   canTranslate,
+  onOpenMedia,
 }: {
   message: Message;
   isMine: boolean;
@@ -222,6 +274,7 @@ function BubbleContent({
   onTranslate: () => void;
   onToggleShowOriginal: () => void;
   canTranslate: boolean;
+  onOpenMedia: (messageId: string) => void;
 }) {
   const parsed = parseReply(message.text);
   const showTranslation = !!(translation && translation.status === 'done' && translation.visible && translation.translated);
@@ -270,7 +323,23 @@ function BubbleContent({
     return (
       <View>
         {parsed.reply ? <ReplyQuote info={parsed.reply} isMine={isMine} /> : null}
-        <SignedImage path={message.imageUri} style={styles.bubbleImage} />
+        <TouchableOpacity activeOpacity={0.9} onPress={() => onOpenMedia(message.id)}>
+          <SignedImage path={message.imageUri} style={styles.bubbleImage} />
+        </TouchableOpacity>
+        {parsed.body ? (
+          <View style={{ marginTop: 8 }}>
+            <MessageText text={displayText} isMine={isMine} />
+            {translateRow}
+          </View>
+        ) : null}
+      </View>
+    );
+  }
+  if (message.kind === 'video' && message.videoUri) {
+    return (
+      <View>
+        {parsed.reply ? <ReplyQuote info={parsed.reply} isMine={isMine} /> : null}
+        <VideoBubble path={message.videoUri} duration={message.videoDuration} onPress={() => onOpenMedia(message.id)} />
         {parsed.body ? (
           <View style={{ marginTop: 8 }}>
             <MessageText text={displayText} isMine={isMine} />
@@ -369,7 +438,8 @@ export default function ChatRoom({ roomId, showUsernames = true }: Props) {
   }, [markRoomSeen, roomId]);
 
   const [text, setText] = useState<string>('');
-  const [pendingImage, setPendingImage] = useState<string | null>(null);
+  const [pendingMedia, setPendingMedia] = useState<{ uri: string; kind: 'image' | 'video'; duration?: number }[]>([]);
+  const [viewerStartId, setViewerStartId] = useState<string | null>(null);
   const [plusOpen, setPlusOpen] = useState<boolean>(false);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [recordStart, setRecordStart] = useState<number>(0);
@@ -473,7 +543,7 @@ export default function ChatRoom({ roomId, showUsernames = true }: Props) {
     if (Platform.OS !== 'web') void Haptics.selectionAsync();
   }, []);
 
-  const canSend = (text.trim().length > 0 || !!pendingImage) && !!profile;
+  const canSend = (text.trim().length > 0 || pendingMedia.length > 0) && !!profile;
 
   const handleSend = useCallback(() => {
     if (!canSend || !profile || isUploading) return;
@@ -504,24 +574,46 @@ export default function ChatRoom({ roomId, showUsernames = true }: Props) {
       mentions: extractMentions(text),
     } as const;
 
-    if (pendingImage) {
+    if (pendingMedia.length > 0) {
       setIsUploading(true);
-      const localUri = pendingImage;
+      const items = pendingMedia.slice();
       void (async () => {
         try {
-          const remoteUrl = await uploadImageForUser(profile.id, localUri);
-          const result = sendMessage({ ...base, kind: 'image', imageUri: remoteUrl, text: finalText || undefined });
-          if (!result.ok) {
-            setErrorBanner(result.error ?? 'Could not send');
-            return;
+          for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            const isLast = i === items.length - 1;
+            const captionForThis = isLast && finalText ? finalText : undefined;
+            try {
+              if (item.kind === 'video') {
+                const remoteUrl = await uploadVideoForUser(profile.id, item.uri);
+                const result = sendMessage({
+                  ...base,
+                  kind: 'video',
+                  videoUri: remoteUrl,
+                  videoDuration: item.duration,
+                  text: captionForThis,
+                });
+                if (!result.ok) setErrorBanner(result.error ?? 'Could not send');
+              } else {
+                const remoteUrl = await uploadImageForUser(profile.id, item.uri);
+                const result = sendMessage({
+                  ...base,
+                  kind: 'image',
+                  imageUri: remoteUrl,
+                  text: captionForThis,
+                });
+                if (!result.ok) setErrorBanner(result.error ?? 'Could not send');
+              }
+              await new Promise(r => setTimeout(r, 2100));
+            } catch (innerErr) {
+              console.log('[upload] media error', innerErr);
+              const msg = innerErr instanceof Error ? innerErr.message : 'Could not upload media';
+              setErrorBanner(msg);
+            }
           }
           setText('');
-          setPendingImage(null);
+          setPendingMedia([]);
           setReplyTo(null);
-        } catch (e) {
-          console.log('[upload] image error', e);
-          const msg = e instanceof Error ? e.message : 'Could not upload image';
-          setErrorBanner(msg);
         } finally {
           setIsUploading(false);
         }
@@ -538,46 +630,53 @@ export default function ChatRoom({ roomId, showUsernames = true }: Props) {
     setReplyTo(null);
   }, [canSend, isUploading, pendingImage, profile, replyTo, roomId, sendMessage, sendScale, text]);
 
-  const pickImage = useCallback(async () => {
-    console.log('[pickImage] tapped');
+  const pickMedia = useCallback(async (mode: 'images' | 'videos' | 'mixed') => {
+    console.log('[pickMedia] tapped', mode);
     setPlusOpen(false);
     await new Promise((r) => setTimeout(r, 250));
     try {
-      console.log('[pickImage] requesting permission');
       const existing = await ImagePicker.getMediaLibraryPermissionsAsync();
       let status = existing.status;
       let canAskAgain = existing.canAskAgain;
-      console.log('[pickImage] existing permission', existing);
       if (status !== 'granted' && status !== 'limited') {
         const req = await ImagePicker.requestMediaLibraryPermissionsAsync();
         status = req.status;
         canAskAgain = req.canAskAgain;
-        console.log('[pickImage] permission result', req);
       }
       if (status !== 'granted' && status !== 'limited') {
         Alert.alert(
-          'Photo access needed',
+          'Library access needed',
           canAskAgain
-            ? 'Island Chat needs access to your photos to send pictures. You can choose "Selected Photos" to share only the ones you pick.'
-            : 'Photo access is off. Open Settings to let Island Chat access the photos you choose.',
+            ? 'Island Chat needs access to your photos and videos to send media. You can choose "Selected Photos" to share only the ones you pick.'
+            : 'Library access is off. Open Settings to let Island Chat access the photos and videos you choose.',
           [{ text: 'OK' }],
         );
         return;
       }
-      console.log('[pickImage] launching library');
+      const mediaTypes: ImagePicker.MediaType[] =
+        mode === 'videos' ? ['videos'] : mode === 'images' ? ['images'] : ['images', 'videos'];
       const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
+        mediaTypes,
         quality: 0.8,
         allowsEditing: false,
-        selectionLimit: 1,
+        allowsMultipleSelection: mode === 'mixed' || mode === 'images',
+        selectionLimit: mode === 'mixed' || mode === 'images' ? 5 : 1,
+        videoMaxDuration: 60,
       });
-      console.log('[pickImage] result', { canceled: res.canceled, count: res.assets?.length });
-      if (!res.canceled && res.assets && res.assets[0]) {
-        setPendingImage(res.assets[0].uri);
-      }
+      if (res.canceled || !res.assets || res.assets.length === 0) return;
+      const items = res.assets.slice(0, 5).map((a) => {
+        const isVideo = a.type === 'video' || a.type === 'pairedVideo';
+        const durationSec = typeof a.duration === 'number' ? Math.round(a.duration / 1000) : undefined;
+        return {
+          uri: a.uri,
+          kind: isVideo ? ('video' as const) : ('image' as const),
+          duration: isVideo ? durationSec : undefined,
+        };
+      });
+      setPendingMedia(items);
     } catch (e) {
-      console.log('pickImage error', e);
-      const msg = e instanceof Error ? e.message : 'Could not open photos';
+      console.log('pickMedia error', e);
+      const msg = e instanceof Error ? e.message : 'Could not open library';
       setErrorBanner(msg);
     }
   }, []);
@@ -858,6 +957,7 @@ export default function ChatRoom({ roomId, showUsernames = true }: Props) {
                     onTranslate={() => runTranslate(item)}
                     onToggleShowOriginal={() => toggleShowTranslation(item.id)}
                     canTranslate={!!parseReply(item.text).body && item.kind !== 'voice'}
+                    onOpenMedia={onOpenMedia}
                   />
                 </LinearGradient>
               ) : (
@@ -877,6 +977,7 @@ export default function ChatRoom({ roomId, showUsernames = true }: Props) {
                     onTranslate={() => runTranslate(item)}
                     onToggleShowOriginal={() => toggleShowTranslation(item.id)}
                     canTranslate={!!parseReply(item.text).body && item.kind !== 'voice'}
+                    onOpenMedia={onOpenMedia}
                   />
                 </View>
               )}
@@ -919,10 +1020,29 @@ export default function ChatRoom({ roomId, showUsernames = true }: Props) {
         </SwipeRow>
       );
     },
-    [messages, profile, showUsernames, expandedTimeIds, translations, targetLanguage, runTranslate, toggleShowTranslation, now, onAvatarTap, onLongPressMessage, onStartReply, toggleReaction, animateReaction, toggleTimestamp],
+    [messages, profile, showUsernames, expandedTimeIds, translations, targetLanguage, runTranslate, toggleShowTranslation, now, onAvatarTap, onLongPressMessage, onStartReply, toggleReaction, animateReaction, toggleTimestamp, onOpenMedia],
   );
 
   void onMentionTap;
+
+  const mediaItems = useMemo<MediaViewerItem[]>(() => {
+    return messages
+      .filter(m => (m.kind === 'image' && m.imageUri) || (m.kind === 'video' && m.videoUri))
+      .map(m => ({
+        id: m.id,
+        kind: m.kind === 'video' ? ('video' as const) : ('image' as const),
+        path: (m.kind === 'video' ? m.videoUri : m.imageUri) as string,
+        caption: parseReply(m.text).body || undefined,
+        username: m.username,
+        avatarEmoji: m.avatarEmoji,
+        createdAt: m.createdAt,
+      }));
+  }, [messages]);
+
+  const onOpenMedia = useCallback((messageId: string) => {
+    if (Platform.OS !== 'web') void Haptics.selectionAsync();
+    setViewerStartId(messageId);
+  }, []);
 
   const reactionDetailUsers = useMemo(() => {
     if (!reactionDetail) return [];
@@ -996,13 +1116,31 @@ export default function ChatRoom({ roomId, showUsernames = true }: Props) {
             </TouchableOpacity>
           </View>
         )}
-        {pendingImage && (
-          <View style={styles.previewRow}>
-            <Image source={{ uri: pendingImage }} style={styles.previewImage} />
-            <TouchableOpacity onPress={() => setPendingImage(null)} style={styles.previewClose}>
-              <X size={14} color={Colors.white} />
-            </TouchableOpacity>
-          </View>
+        {pendingMedia.length > 0 && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.previewRow}
+            contentContainerStyle={{ gap: 10, paddingRight: 18 }}
+          >
+            {pendingMedia.map((item, idx) => (
+              <View key={`${item.uri}-${idx}`} style={styles.previewItem}>
+                <Image source={{ uri: item.uri }} style={styles.previewImage} />
+                {item.kind === 'video' && (
+                  <View style={styles.previewVideoBadge} pointerEvents="none">
+                    <Play size={14} color={Colors.white} fill={Colors.white} />
+                  </View>
+                )}
+                <TouchableOpacity
+                  onPress={() => setPendingMedia(prev => prev.filter((_, i) => i !== idx))}
+                  style={styles.previewItemClose}
+                  hitSlop={6}
+                >
+                  <X size={12} color={Colors.white} />
+                </TouchableOpacity>
+              </View>
+            ))}
+          </ScrollView>
         )}
         {recording && (
           <View style={styles.recordingBar}>
@@ -1070,11 +1208,18 @@ export default function ChatRoom({ roomId, showUsernames = true }: Props) {
         <Pressable style={styles.modalBackdrop} onPress={() => setPlusOpen(false)}>
           <View style={[styles.sheet, { paddingBottom: insets.bottom + 16 }]}>
             <View style={styles.sheetHandle} />
-            <TouchableOpacity style={styles.sheetItem} onPress={pickImage}>
+            <TouchableOpacity style={styles.sheetItem} onPress={() => pickMedia('mixed')} testID="send-media">
               <View style={styles.sheetIcon}><ImageIcon size={20} color={Colors.accentLight} /></View>
               <View>
-                <Text style={styles.sheetTitle}>Send image</Text>
-                <Text style={styles.sheetSub}>Pick from your gallery</Text>
+                <Text style={styles.sheetTitle}>Photos & videos</Text>
+                <Text style={styles.sheetSub}>Pick up to 5 from your library</Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.sheetItem} onPress={() => pickMedia('videos')} testID="send-video">
+              <View style={styles.sheetIcon}><VideoIcon size={20} color={Colors.accentLight} /></View>
+              <View>
+                <Text style={styles.sheetTitle}>Send a video</Text>
+                <Text style={styles.sheetSub}>Up to 60 seconds, 50 MB</Text>
               </View>
             </TouchableOpacity>
             <TouchableOpacity
@@ -1091,6 +1236,13 @@ export default function ChatRoom({ roomId, showUsernames = true }: Props) {
           </View>
         </Pressable>
       </Modal>
+
+      <MediaViewer
+        visible={!!viewerStartId}
+        items={mediaItems}
+        startId={viewerStartId}
+        onClose={() => setViewerStartId(null)}
+      />
 
       <Modal visible={!!reactionTarget} transparent animationType="fade" onRequestClose={() => setReactionTarget(null)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setReactionTarget(null)}>
@@ -1256,7 +1408,24 @@ const styles = StyleSheet.create({
   },
   bubbleOtherGrouped: { borderTopLeftRadius: 8 },
   bubbleOtherGroupedBottom: { borderBottomLeftRadius: 8 },
-  bubbleImage: { width: 220, height: 220, borderRadius: 16, backgroundColor: Colors.bgElevated },
+  bubbleImage: { width: 220, height: 220, borderRadius: 16, backgroundColor: Colors.bgElevated, overflow: 'hidden' },
+  videoOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  videoPlayCircle: {
+    width: 56, height: 56, borderRadius: 28,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)',
+  },
+  videoDurationBadge: {
+    position: 'absolute', right: 8, bottom: 8,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 8, paddingVertical: 3,
+    borderRadius: 999,
+  },
+  videoDurationText: { color: Colors.white, fontSize: 11, fontWeight: '700' as const, letterSpacing: 0.3 },
   metaText: { color: Colors.textTertiary, fontSize: 10, marginTop: 4, marginHorizontal: 6 },
   reactionsRow: { flexDirection: 'row', gap: 4, marginTop: 6, flexWrap: 'wrap' },
   reactionChip: {
@@ -1311,13 +1480,20 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === 'ios' ? 10 : 6, paddingBottom: Platform.OS === 'ios' ? 10 : 6,
   },
   sendBtn: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
-  previewRow: { paddingHorizontal: 18, marginBottom: 6 },
-  previewImage: { width: 80, height: 80, borderRadius: 14 },
-  previewClose: {
-    position: 'absolute', top: -4, left: 88,
+  previewRow: { paddingHorizontal: 18, marginBottom: 6, flexGrow: 0 },
+  previewItem: { width: 80, height: 80 },
+  previewImage: { width: 80, height: 80, borderRadius: 14, backgroundColor: Colors.bgElevated },
+  previewItemClose: {
+    position: 'absolute', top: -4, right: -4,
     width: 22, height: 22, borderRadius: 11,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: 'rgba(0,0,0,0.75)',
     alignItems: 'center', justifyContent: 'center',
+  },
+  previewVideoBadge: {
+    position: 'absolute', left: 0, right: 0, top: 0, bottom: 0,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    borderRadius: 14,
   },
   recordingBar: {
     flexDirection: 'row', alignItems: 'center', gap: 10,

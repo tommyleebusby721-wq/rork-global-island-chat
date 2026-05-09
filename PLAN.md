@@ -1,38 +1,33 @@
-# Switch chat media to private bucket with short-lived signed URLs
+# Send photos & videos in chats with swipeable full-screen viewer
 
-## What changes
+## What you'll be able to do
 
-Right now, any image or voice note sent in chat lives in a **public** storage bucket — anyone with the URL can view it forever. We'll lock the bucket down so only signed-in users can read media, and the app will generate fresh short-lived viewing links on the fly.
+- **Send videos** alongside photos in island group chats and private DMs
+- **Send multiple items at once** — pick several photos/videos from your library
+- **Tap any media in chat** to open a full-screen preview
+- **Swipe left/right** through every photo and video in that conversation, just like WhatsApp
+- **Tap play** on videos in the full-screen viewer to watch them
+- **Pinch-to-zoom** on photos in the full-screen viewer
+- Close the viewer by swiping down or tapping the X
 
-## Features
+## Design
 
-- **Private media by default** — photos and voice notes can't be opened by just pasting the URL in a browser.
-- **Short-lived viewing links** — when a chat bubble shows an image or plays a voice note, the app quietly requests a 1-hour access link behind the scenes.
-- **Automatic refresh** — if a link expires while you're scrolling, it's regenerated on the next view.
-- **In-memory cache** — once a link is generated for a message, it's reused across the session so scrolling stays fast.
-- **Old messages** — any messages sent before this update will stop loading their media, but since all chat messages auto-expire after 24 hours, this clears itself out within a day.
+- Video bubbles look just like photo bubbles, with a rounded thumbnail and a centered play button overlay
+- Small duration badge in the corner of each video thumbnail (e.g. "0:12")
+- Full-screen viewer uses a pure black background for an immersive feel
+- Smooth fade + zoom-in animation when opening, swipe-to-dismiss when closing
+- Page indicator dots at the bottom so you know where you are in the gallery
+- Caption (if any) shown over the bottom of the image, like WhatsApp
+- Sender name and timestamp at the top of the viewer
 
-## How it will feel
+## Behind the scenes
 
-- No visible change to you — images and voice notes still appear instantly in chat.
-- Slight delay the first time an image loads (a few hundred milliseconds to fetch the signed link), then instant on subsequent views.
-- Uploads work exactly the same as today.
+- Videos are compressed and uploaded to your existing media storage, with the same per-user quota system used for photos
+- Videos auto-pause when you swipe to a different item, so only one plays at a time
+- Old videos rotate out automatically once a user goes over their limit (same as photos today)
 
-## Security improvement
+## How it shows up
 
-- Storage bucket flipped to private.
-- Read access requires being signed in; insert/update/delete still restricted to each user's own folder (unchanged).
-- Leaked URLs become useless after 1 hour.
+- **Chat screen (island & DM)**: the existing "send image" sheet becomes a "send media" sheet with options for Photo, Video, and Library (multi-select)
+- **New full-screen media viewer**: opens on top of the chat when you tap any photo or video, lets you swipe through every photo/video shared in that room
 
-## What gets updated
-
-- The stored storage setup file gets an updated policy block for reference/tracking.
-- The media upload helper now returns the storage path (not a permanent public URL).
-- A small helper generates signed URLs on demand with caching.
-- Chat bubbles (image + voice player) use this helper to resolve the actual playback URL.
-
-## Not changing
-
-- Upload flow, file size limits, per-user quotas (5 photos / 10 voice).
-- Message table schema — we'll keep the existing `image_uri` / `voice_uri` columns but store the storage path instead of the full URL going forward.
-- The voice recording MIME-type fix and other recent changes stay as-is.

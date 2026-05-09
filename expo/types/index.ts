@@ -8,7 +8,7 @@ export interface UserProfile {
   dmPushEnabled?: boolean;
 }
 
-export type MessageKind = 'text' | 'image' | 'voice';
+export type MessageKind = 'text' | 'image' | 'voice' | 'video';
 
 export interface Reaction {
   emoji: string;
@@ -26,6 +26,8 @@ export interface Message {
   imageUri?: string;
   voiceUri?: string;
   voiceDuration?: number;
+  videoUri?: string;
+  videoDuration?: number;
   createdAt: number;
   expiresAt: number;
   mentions?: string[];

@@ -7,6 +7,8 @@ import { supabase } from '@/lib/supabase';
 export const BUCKET = 'chat-media';
 export const MAX_PHOTOS_PER_USER = 5;
 export const MAX_VOICE_PER_USER = 10;
+export const MAX_VIDEOS_PER_USER = 5;
+export const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 
 function guessExt(uri: string, fallback: string): string {
   const m = uri.match(/\.([a-zA-Z0-9]{2,5})(?:\?|$)/);
@@ -83,7 +85,7 @@ export function invalidateSignedMediaUrl(pathOrUrl: string): void {
   signedUrlCache.delete(pathOrUrl);
 }
 
-async function listUserFiles(userId: string, prefix: 'photos' | 'voice'): Promise<{ name: string; created_at?: string }[]> {
+async function listUserFiles(userId: string, prefix: 'photos' | 'voice' | 'videos'): Promise<{ name: string; created_at?: string }[]> {
   const { data, error } = await supabase.storage.from(BUCKET).list(`${userId}/${prefix}`, {
     limit: 100,
     sortBy: { column: 'created_at', order: 'asc' },
@@ -95,7 +97,7 @@ async function listUserFiles(userId: string, prefix: 'photos' | 'voice'): Promis
   return (data ?? []).filter(f => f.name && !f.name.startsWith('.'));
 }
 
-async function enforceQuota(userId: string, prefix: 'photos' | 'voice', max: number): Promise<void> {
+async function enforceQuota(userId: string, prefix: 'photos' | 'voice' | 'videos', max: number): Promise<void> {
   const files = await listUserFiles(userId, prefix);
   if (files.length < max) return;
   const toDelete = files.slice(0, files.length - max + 1).map(f => `${userId}/${prefix}/${f.name}`);
@@ -165,5 +167,40 @@ export async function uploadVoiceForUser(userId: string, localUri: string): Prom
   if (error) throw new Error(error.message);
 
   void enforceQuota(userId, 'voice', MAX_VOICE_PER_USER).catch(() => {});
+  return path;
+}
+
+export async function uploadVideoForUser(userId: string, localUri: string): Promise<string> {
+  const ext = guessExt(localUri, 'mp4');
+  const safeExt = ext === 'mov' || ext === 'mp4' || ext === 'm4v' || ext === 'webm' ? ext : 'mp4';
+  const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${safeExt}`;
+  const path = `${userId}/videos/${fileName}`;
+
+  const contentType =
+    safeExt === 'webm' ? 'video/webm' :
+    safeExt === 'mov' ? 'video/quicktime' :
+    'video/mp4';
+
+  let body: Blob | ArrayBuffer;
+  let size = 0;
+  if (Platform.OS === 'web') {
+    body = await uriToBlob(localUri);
+    size = (body as Blob).size;
+  } else {
+    body = await readAsArrayBuffer(localUri);
+    size = (body as ArrayBuffer).byteLength;
+  }
+  if (size > MAX_VIDEO_BYTES) {
+    throw new Error(`Video too large (${Math.round(size / 1024 / 1024)} MB). Max is ${Math.round(MAX_VIDEO_BYTES / 1024 / 1024)} MB.`);
+  }
+  console.log('[media] uploading video', path, 'bytes', size, contentType);
+
+  const { error } = await supabase.storage.from(BUCKET).upload(path, body, {
+    contentType,
+    upsert: false,
+  });
+  if (error) throw new Error(error.message);
+
+  void enforceQuota(userId, 'videos', MAX_VIDEOS_PER_USER).catch(() => {});
   return path;
 }

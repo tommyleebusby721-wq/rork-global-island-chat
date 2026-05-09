@@ -20,7 +20,7 @@ interface DbMessage {
   user_id: string;
   username: string;
   avatar_emoji: string;
-  kind: 'text' | 'image' | 'voice';
+  kind: 'text' | 'image' | 'voice' | 'video';
   text: string | null;
   image_uri: string | null;
   voice_uri: string | null;
@@ -32,6 +32,7 @@ interface DbMessage {
 }
 
 function dbToMessage(r: DbMessage): Message {
+  const isVideo = r.kind === 'video';
   return {
     id: r.id,
     roomId: r.room_id,
@@ -40,9 +41,11 @@ function dbToMessage(r: DbMessage): Message {
     avatarEmoji: r.avatar_emoji,
     kind: r.kind,
     text: r.text ?? undefined,
-    imageUri: r.image_uri ?? undefined,
-    voiceUri: r.voice_uri ?? undefined,
-    voiceDuration: r.voice_duration ?? undefined,
+    imageUri: !isVideo ? (r.image_uri ?? undefined) : undefined,
+    videoUri: isVideo ? (r.image_uri ?? undefined) : undefined,
+    videoDuration: isVideo ? (r.voice_duration ?? undefined) : undefined,
+    voiceUri: !isVideo ? (r.voice_uri ?? undefined) : undefined,
+    voiceDuration: !isVideo ? (r.voice_duration ?? undefined) : undefined,
     mentions: r.mentions ?? undefined,
     reactions: r.reactions ?? [],
     createdAt: new Date(r.created_at).getTime(),
@@ -55,11 +58,13 @@ interface SendInput {
   userId: string;
   username: string;
   avatarEmoji: string;
-  kind: 'text' | 'image' | 'voice';
+  kind: 'text' | 'image' | 'voice' | 'video';
   text?: string;
   imageUri?: string;
   voiceUri?: string;
   voiceDuration?: number;
+  videoUri?: string;
+  videoDuration?: number;
   mentions?: string[];
 }
 
@@ -238,6 +243,8 @@ export const [ChatProvider, useChat] = createContextHook(() => {
         imageUri: input.imageUri,
         voiceUri: input.voiceUri,
         voiceDuration: input.voiceDuration,
+        videoUri: input.videoUri,
+        videoDuration: input.videoDuration,
         mentions: input.mentions,
         createdAt: current,
         expiresAt: current + TTL_MS,
@@ -257,9 +264,9 @@ export const [ChatProvider, useChat] = createContextHook(() => {
               avatar_emoji: input.avatarEmoji,
               kind: input.kind,
               text: input.text ?? null,
-              image_uri: input.imageUri ?? null,
+              image_uri: input.kind === 'video' ? (input.videoUri ?? null) : (input.imageUri ?? null),
               voice_uri: input.voiceUri ?? null,
-              voice_duration: input.voiceDuration ?? null,
+              voice_duration: input.kind === 'video' ? (input.videoDuration ?? null) : (input.voiceDuration ?? null),
               mentions: input.mentions ?? [],
               reactions: [],
               expires_at: expiresIso,
