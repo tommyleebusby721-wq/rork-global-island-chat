@@ -347,6 +347,7 @@ export const [UserProvider, useUser] = createContextHook(() => {
           data = inserted;
         }
 
+        if (!data) return { ok: false, error: 'Could not create profile' };
         const p: DbProfile = data;
         const newProfile: UserProfile = {
           id: p.id,

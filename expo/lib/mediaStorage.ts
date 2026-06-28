@@ -94,7 +94,7 @@ async function listUserFiles(userId: string, prefix: 'photos' | 'voice' | 'video
     console.log('[media] list error', error.message);
     return [];
   }
-  return (data ?? []).filter(f => f.name && !f.name.startsWith('.'));
+  return (data ?? []).filter(f => f.name && !f.name.startsWith('.')).map(f => ({ name: f.name, created_at: f.created_at ?? undefined }));
 }
 
 async function enforceQuota(userId: string, prefix: 'photos' | 'voice' | 'videos', max: number): Promise<void> {

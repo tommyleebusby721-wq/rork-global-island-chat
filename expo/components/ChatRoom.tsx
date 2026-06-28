@@ -628,7 +628,7 @@ export default function ChatRoom({ roomId, showUsernames = true }: Props) {
     }
     setText('');
     setReplyTo(null);
-  }, [canSend, isUploading, pendingImage, profile, replyTo, roomId, sendMessage, sendScale, text]);
+  }, [canSend, isUploading, pendingMedia, profile, replyTo, roomId, sendMessage, sendScale, text]);
 
   const pickMedia = useCallback(async (mode: 'images' | 'videos' | 'mixed') => {
     console.log('[pickMedia] tapped', mode);
@@ -636,7 +636,7 @@ export default function ChatRoom({ roomId, showUsernames = true }: Props) {
     await new Promise((r) => setTimeout(r, 250));
     try {
       const existing = await ImagePicker.getMediaLibraryPermissionsAsync();
-      let status = existing.status;
+      let status: string = existing.status;
       let canAskAgain = existing.canAskAgain;
       if (status !== 'granted' && status !== 'limited') {
         const req = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -682,7 +682,7 @@ export default function ChatRoom({ roomId, showUsernames = true }: Props) {
   }, []);
 
   const startRecording = useCallback(async () => {
-    if (Platform.OS === 'web') {
+    if (Platform.OS === 'web' as string) {
       setPlusOpen(false);
       setErrorBanner('Voice notes not supported on web');
       return;
@@ -1020,10 +1020,15 @@ export default function ChatRoom({ roomId, showUsernames = true }: Props) {
         </SwipeRow>
       );
     },
-    [messages, profile, showUsernames, expandedTimeIds, translations, targetLanguage, runTranslate, toggleShowTranslation, now, onAvatarTap, onLongPressMessage, onStartReply, toggleReaction, animateReaction, toggleTimestamp, onOpenMedia],
+    [messages, profile, showUsernames, expandedTimeIds, translations, targetLanguage, runTranslate, toggleShowTranslation, now, onAvatarTap, onLongPressMessage, onStartReply, toggleReaction, animateReaction, toggleTimestamp],
   );
 
   void onMentionTap;
+
+  const onOpenMedia = useCallback((messageId: string) => {
+    if (Platform.OS !== 'web') void Haptics.selectionAsync();
+    setViewerStartId(messageId);
+  }, []);
 
   const mediaItems = useMemo<MediaViewerItem[]>(() => {
     return messages
@@ -1038,11 +1043,6 @@ export default function ChatRoom({ roomId, showUsernames = true }: Props) {
         createdAt: m.createdAt,
       }));
   }, [messages]);
-
-  const onOpenMedia = useCallback((messageId: string) => {
-    if (Platform.OS !== 'web') void Haptics.selectionAsync();
-    setViewerStartId(messageId);
-  }, []);
 
   const reactionDetailUsers = useMemo(() => {
     if (!reactionDetail) return [];

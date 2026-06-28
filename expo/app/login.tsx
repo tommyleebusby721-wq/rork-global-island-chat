@@ -273,4 +273,8 @@ const styles = StyleSheet.create({
   },
   signupLinkText: { color: Colors.textSecondary, fontSize: 14 },
   signupLinkBold: { color: Colors.accentLight, fontWeight: '700' as const },
+  forgotWrap: {
+    alignSelf: 'flex-end', marginTop: 8, paddingVertical: 8,
+  },
+  forgotText: { color: Colors.accentLight, fontSize: 14, fontWeight: '600' as const },
 });

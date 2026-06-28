@@ -5,6 +5,7 @@
 --
 -- Per-user quota (enforced client-side + server cap):
 --   • 5 photos per user (auto-compressed to ~150 KB JPEG, 1024px max)
+--   • 5 videos per user (max 55 MB each)
 --   • 10 voice notes per user (~80 KB each)
 -- Estimated ceiling for 1,000,000 users: ~1.5 TB.
 -- Older files are rotated out automatically when a user exceeds the cap.
@@ -13,6 +14,7 @@
 -- Folder layout enforced by RLS:
 --   {auth.uid()}/photos/<file>.jpg
 --   {auth.uid()}/voice/<file>.m4a
+--   {auth.uid()}/videos/<file>.mp4
 --
 -- Bucket is PRIVATE. Clients access media via short-lived signed URLs
 -- generated on-demand (see expo/lib/mediaStorage.ts → getSignedMediaUrl).
@@ -23,8 +25,8 @@ values (
   'chat-media',
   'chat-media',
   false,
-  2 * 1024 * 1024,
-  array['image/jpeg','image/png','image/webp','audio/mp4','audio/mpeg','audio/webm','audio/aac','audio/wav']
+  55 * 1024 * 1024,
+  array['image/jpeg','image/png','image/webp','audio/mp4','audio/mpeg','audio/webm','audio/aac','audio/wav','video/mp4','video/quicktime','video/webm','video/x-m4v']
 )
 on conflict (id) do update
   set public = excluded.public,
@@ -51,7 +53,7 @@ create policy "chat-media insert own"
   with check (
     bucket_id = 'chat-media'
     and auth.uid()::text = (storage.foldername(name))[1]
-    and (storage.foldername(name))[2] in ('photos', 'voice')
+    and (storage.foldername(name))[2] in ('photos', 'voice', 'videos')
   );
 
 -- UPDATE — only your own files

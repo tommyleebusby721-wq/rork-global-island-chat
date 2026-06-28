@@ -953,4 +953,14 @@ const styles = StyleSheet.create({
     color: Colors.textTertiary, fontSize: 11, textAlign: 'center',
     marginTop: 8, paddingHorizontal: 16, lineHeight: 16,
   },
+  searchBar: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: Colors.bgCard, borderRadius: 14,
+    paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  searchInput: {
+    flex: 1, color: Colors.text, fontSize: 15,
+    padding: 0,
+  },
 });
